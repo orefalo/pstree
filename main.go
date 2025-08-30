@@ -58,17 +58,17 @@ var treeChars = []TreeChars{
 
 // Process represents a single process
 type Process struct {
-	UID     int64
-	PID     int64
-	PPID    int64
-	PGID    int64
+	UID     int
+	PID     int
+	PPID    int
+	PGID    int
 	Owner   string
 	Cmd     string
 	Print   bool
 	Parent  int
 	Child   int
 	Sister  int
-	ThCount int64
+	ThCount int
 }
 
 // Config holds the application configuration
@@ -81,7 +81,7 @@ type Config struct {
 	Str      string
 	ShowPIDs bool
 	// optional pid to start from, default parent pid
-	IPid  int64
+	IPid  int
 	Input string
 	// current rendering depth
 	AtLDepth int
@@ -95,7 +95,7 @@ type Config struct {
 	Long bool
 	// terminal width in columns
 	Columns int
-	// caracter set used to render the tree
+	// character set used to render the tree
 	TreeChar *TreeChars
 }
 
@@ -140,7 +140,7 @@ func getProcessesDirect() error {
 		// Get UID from directory stat
 		if stat, err := os.Stat(procDir); err == nil {
 			if sysStat, ok := stat.Sys().(*syscall.Stat_t); ok {
-				proc.UID = int64(sysStat.Uid)
+				proc.UID = int(sysStat.Uid)
 				if u, err := user.LookupId(strconv.Itoa(int(proc.UID))); err == nil {
 					proc.Owner = u.Username
 				} else {
@@ -163,7 +163,7 @@ func getProcessesDirect() error {
 			continue
 		}
 
-		if pid, err := strconv.ParseInt(statFields[0], 10, 64); err == nil {
+		if pid, err := strconv.Atoi(statFields[0]); err == nil {
 			proc.PID = pid
 		} else {
 			continue
@@ -171,11 +171,11 @@ func getProcessesDirect() error {
 
 		proc.Cmd = strings.Trim(statFields[1], "()")
 
-		if ppid, err := strconv.ParseInt(statFields[3], 10, 64); err == nil {
+		if ppid, err := strconv.Atoi(statFields[3]); err == nil {
 			proc.PPID = ppid
 		}
 
-		if pgid, err := strconv.ParseInt(statFields[4], 10, 64); err == nil {
+		if pgid, err := strconv.Atoi(statFields[4]); err == nil {
 			proc.PGID = pgid
 		}
 
@@ -270,7 +270,7 @@ func getProcesses() error {
 		// Parse based on OS and ps format
 		switch runtime.GOOS {
 		case "linux", "aix":
-			if uid, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
+			if uid, err := strconv.Atoi(fields[0]); err == nil {
 				proc.UID = uid
 				if u, err := user.LookupId(fields[0]); err == nil {
 					proc.Owner = u.Username
@@ -278,18 +278,18 @@ func getProcesses() error {
 					proc.Owner = fmt.Sprintf("#%s", fields[0])
 				}
 			}
-			if pid, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+			if pid, err := strconv.Atoi(fields[1]); err == nil {
 				proc.PID = pid
 			}
-			if ppid, err := strconv.ParseInt(fields[2], 10, 64); err == nil {
+			if ppid, err := strconv.Atoi(fields[2]); err == nil {
 				proc.PPID = ppid
 			}
-			if pgid, err := strconv.ParseInt(fields[3], 10, 64); err == nil {
+			if pgid, err := strconv.Atoi(fields[3]); err == nil {
 				proc.PGID = pgid
 			}
 			if len(fields) > 4 {
 				if runtime.GOOS == "aix" && len(fields) > 5 {
-					if thcount, err := strconv.ParseInt(fields[4], 10, 64); err == nil {
+					if thcount, err := strconv.Atoi(fields[4]); err == nil {
 						proc.ThCount = thcount
 					}
 					proc.Cmd = strings.Join(fields[5:], " ")
@@ -300,13 +300,13 @@ func getProcesses() error {
 			}
 		case "freebsd", "netbsd", "openbsd":
 			proc.Owner = fields[0]
-			if pid, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+			if pid, err := strconv.Atoi(fields[1]); err == nil {
 				proc.PID = pid
 			}
-			if ppid, err := strconv.ParseInt(fields[2], 10, 64); err == nil {
+			if ppid, err := strconv.Atoi(fields[2]); err == nil {
 				proc.PPID = ppid
 			}
-			if pgid, err := strconv.ParseInt(fields[3], 10, 64); err == nil {
+			if pgid, err := strconv.Atoi(fields[3]); err == nil {
 				proc.PGID = pgid
 			}
 			if len(fields) > 4 {
@@ -315,20 +315,20 @@ func getProcesses() error {
 			proc.ThCount = 1
 		case "darwin":
 			proc.Owner = fields[0]
-			if pid, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+			if pid, err := strconv.Atoi(fields[1]); err == nil {
 				proc.PID = pid
 			}
-			if ppid, err := strconv.ParseInt(fields[2], 10, 64); err == nil {
+			if ppid, err := strconv.Atoi(fields[2]); err == nil {
 				proc.PPID = ppid
 			}
-			if pgid, err := strconv.ParseInt(fields[3], 10, 64); err == nil {
+			if pgid, err := strconv.Atoi(fields[3]); err == nil {
 				proc.PGID = pgid
 			}
 
 			if len(fields) > 4 {
 
 				if len(fields) > 5 {
-					if thcount, err := strconv.ParseInt(fields[4], 10, 64); err == nil {
+					if thcount, err := strconv.Atoi(fields[4]); err == nil {
 						proc.ThCount = thcount
 					}
 					proc.Cmd = fields[5]
@@ -347,10 +347,10 @@ func getProcesses() error {
 		default:
 			// Default ps -ef format
 			proc.Owner = fields[0]
-			if pid, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+			if pid, err := strconv.Atoi(fields[1]); err == nil {
 				proc.PID = pid
 			}
-			if ppid, err := strconv.ParseInt(fields[2], 10, 64); err == nil {
+			if ppid, err := strconv.Atoi(fields[2]); err == nil {
 				proc.PPID = ppid
 			}
 			if len(fields) > 7 {
@@ -376,7 +376,7 @@ func getProcesses() error {
 }
 
 // getTopPID finds the root process PID
-func getTopPID() int64 {
+func getTopPID() int {
 	// Look for PID 1
 	for _, proc := range procs {
 		if proc.PID == 1 {
@@ -411,7 +411,7 @@ func getTopPID() int64 {
 }
 
 // getTopPID finds the root process PID
-func getPidFromProcs(pid int64) int64 {
+func getPidFromProcs(pid int) int {
 
 	// Look for pid
 	for _, proc := range procs {
@@ -433,7 +433,7 @@ func getPidFromProcs(pid int64) int64 {
 }
 
 // getPidIndex finds the index of a process by PID
-func getPidIndex(pid int64) int {
+func getPidIndex(pid int) int {
 	for i := len(procs) - 1; i >= 0; i-- {
 		if procs[i].PID == pid {
 			return i
@@ -489,7 +489,7 @@ func markProcs() {
 			if config.IPid != -1 && procs[i].PID == config.IPid {
 				shouldMark = true
 			}
-			if config.SOption && strings.Contains(procs[i].Cmd, config.Str) && procs[i].PID != int64(myPID) {
+			if config.SOption && strings.Contains(procs[i].Cmd, config.Str) && procs[i].PID != myPID {
 				shouldMark = true
 			}
 
@@ -662,7 +662,7 @@ If a user name is specified, all process trees rooted at processes owned by that
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			if len(args) == 1 {
-				if c, err := strconv.ParseInt(args[0], 10, 64); err == nil {
+				if c, err := strconv.Atoi(args[0]); err == nil {
 					config.IPid = c
 					config.Str = ""
 				} else {
@@ -746,7 +746,7 @@ If a user name is specified, all process trees rooted at processes owned by that
 			} else {
 				// Print trees for specified PIDs
 				for _, arg := range args {
-					if pid, err := strconv.ParseInt(arg, 10, 64); err == nil {
+					if pid, err := strconv.Atoi(arg); err == nil {
 						if idx := getPidIndex(pid); idx != -1 {
 							printTree(idx, "")
 						}
