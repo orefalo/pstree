@@ -2,7 +2,7 @@
 
 BINARY_NAME=pstree-go
 VERSION=3.0.0
-BUILD_DIR=build
+BUILD_DIR=.
 
 # Go parameters
 GOCMD=go

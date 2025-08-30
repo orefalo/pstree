@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,11 +15,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
 const (
 	maxLine = 8192
-	version = "3.0.0"
+	version = "4.0.0"
 )
 
 // TreeChars defines the characters used for drawing the tree
@@ -60,7 +62,7 @@ type Process struct {
 	PID     int64
 	PPID    int64
 	PGID    int64
-	Name    string
+	Owner   string
 	Cmd     string
 	Print   bool
 	Parent  int
@@ -71,29 +73,41 @@ type Process struct {
 
 // Config holds the application configuration
 type Config struct {
-	ShowAll   bool
-	SOption   bool
-	UOption   bool
-	Name      string
-	Str       string
-	IPid      int64
-	Input     string
-	AtLDepth  int
+	ShowAll bool
+	SOption bool
+	UOption bool
+	Name    string
+	// optional string to filter start processes
+	Str      string
+	ShowPIDs bool
+	// optional pid to start from, default parent pid
+	IPid  int64
+	Input string
+	// current rendering depth
+	AtLDepth int
+	// maximum tree depth
 	MaxLDepth int
 	Compress  bool
 	Debug     bool
-	Graphics  int
-	Wide      bool
-	Columns   int
-	TreeChar  *TreeChars
+	// character set selector in treeChars
+	Graphics int
+	// For long output (no width truncation)
+	Long bool
+	// terminal width in columns
+	Columns int
+	// caracter set used to render the tree
+	TreeChar *TreeChars
 }
 
 var (
 	config  Config
 	procs   []Process
 	myPID   int
-	rootPID int64
-	nProc   int
+	myPPID  int
+	rootPID int
+
+	// number of discovered processes
+	nProc int
 )
 
 func init() {
@@ -104,6 +118,7 @@ func init() {
 		TreeChar:  &treeChars[GraphicsASCII],
 	}
 	myPID = os.Getpid()
+	myPPID = os.Getppid()
 }
 
 // getProcessesDirect reads processes directly from /proc filesystem (Linux)
@@ -127,9 +142,9 @@ func getProcessesDirect() error {
 			if sysStat, ok := stat.Sys().(*syscall.Stat_t); ok {
 				proc.UID = int64(sysStat.Uid)
 				if u, err := user.LookupId(strconv.Itoa(int(proc.UID))); err == nil {
-					proc.Name = u.Username
+					proc.Owner = u.Username
 				} else {
-					proc.Name = fmt.Sprintf("#%d", proc.UID)
+					proc.Owner = fmt.Sprintf("#%d", proc.UID)
 				}
 			}
 		} else {
@@ -212,7 +227,7 @@ func getProcesses() error {
 		case "linux":
 			psCmd = []string{"ps", "-eo", "uid,pid,ppid,pgid,args"}
 		case "darwin", "freebsd", "netbsd", "openbsd":
-			psCmd = []string{"ps", "-axwwo", "user,pid,ppid,pgid,command"}
+			psCmd = []string{"ps", "-axwwo", "user,pid,ppid,pgid,wq,comm"}
 		case "aix":
 			psCmd = []string{"ps", "-eko", "uid,pid,ppid,pgid,thcount,args"}
 		default:
@@ -258,9 +273,9 @@ func getProcesses() error {
 			if uid, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
 				proc.UID = uid
 				if u, err := user.LookupId(fields[0]); err == nil {
-					proc.Name = u.Username
+					proc.Owner = u.Username
 				} else {
-					proc.Name = fmt.Sprintf("#%s", fields[0])
+					proc.Owner = fmt.Sprintf("#%s", fields[0])
 				}
 			}
 			if pid, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
@@ -283,8 +298,8 @@ func getProcesses() error {
 					proc.Cmd = strings.Join(fields[4:], " ")
 				}
 			}
-		case "darwin", "freebsd", "netbsd", "openbsd":
-			proc.Name = fields[0]
+		case "freebsd", "netbsd", "openbsd":
+			proc.Owner = fields[0]
 			if pid, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
 				proc.PID = pid
 			}
@@ -298,9 +313,40 @@ func getProcesses() error {
 				proc.Cmd = strings.Join(fields[4:], " ")
 			}
 			proc.ThCount = 1
+		case "darwin":
+			proc.Owner = fields[0]
+			if pid, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+				proc.PID = pid
+			}
+			if ppid, err := strconv.ParseInt(fields[2], 10, 64); err == nil {
+				proc.PPID = ppid
+			}
+			if pgid, err := strconv.ParseInt(fields[3], 10, 64); err == nil {
+				proc.PGID = pgid
+			}
+
+			if len(fields) > 4 {
+
+				if len(fields) > 5 {
+					if thcount, err := strconv.ParseInt(fields[4], 10, 64); err == nil {
+						proc.ThCount = thcount
+					}
+					proc.Cmd = fields[5]
+				} else {
+					proc.ThCount = 1
+					proc.Cmd = fields[4]
+				}
+
+				// strip long paths
+				//lastSlash := strings.LastIndex(proc.Cmd, "/")
+				//if lastSlash != -1 {
+				//	proc.Cmd = proc.Cmd[lastSlash+1:] // Everything after the last slash
+				//}
+
+			}
 		default:
 			// Default ps -ef format
-			proc.Name = fields[0]
+			proc.Owner = fields[0]
 			if pid, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
 				proc.PID = pid
 			}
@@ -329,8 +375,8 @@ func getProcesses() error {
 	return nil
 }
 
-// getRootPID finds the root process PID
-func getRootPID() int64 {
+// getTopPID finds the root process PID
+func getTopPID() int64 {
 	// Look for PID 1
 	for _, proc := range procs {
 		if proc.PID == 1 {
@@ -360,6 +406,28 @@ func getRootPID() int64 {
 	}
 
 	fmt.Fprintf(os.Stderr, "pstree: No process found with PID == 1 || PPID == 0 || PPID == 1 || PID == PPID\n")
+	os.Exit(1)
+	return 0
+}
+
+// getTopPID finds the root process PID
+func getPidFromProcs(pid int64) int64 {
+
+	// Look for pid
+	for _, proc := range procs {
+		if proc.PID == pid {
+			return pid
+		}
+	}
+
+	// look for pid as a ppid
+	for _, proc := range procs {
+		if proc.PPID == pid {
+			return proc.PID
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "pstree: No process found with PID == %d\n", pid)
 	os.Exit(1)
 	return 0
 }
@@ -412,10 +480,10 @@ func markProcs() {
 			shouldMark := false
 
 			// Check various criteria
-			if config.Name != "" && procs[i].Name == config.Name {
+			if config.Name != "" && procs[i].Owner == config.Name {
 				shouldMark = true
 			}
-			if config.UOption && procs[i].Name != "root" {
+			if config.UOption && procs[i].Owner != "root" {
 				shouldMark = true
 			}
 			if config.IPid != -1 && procs[i].PID == config.IPid {
@@ -469,6 +537,7 @@ func printTree(idx int, head string) {
 	if config.AtLDepth == config.MaxLDepth {
 		return
 	}
+
 	config.AtLDepth++
 
 	var thread string
@@ -507,7 +576,7 @@ func printTree(idx int, head string) {
 		pgl,
 		config.TreeChar.EG,
 		procs[idx].PID,
-		procs[idx].Name,
+		procs[idx].Owner,
 		thread,
 		procs[idx].Cmd)
 
@@ -526,6 +595,7 @@ func printTree(idx int, head string) {
 		nhead = head + "  "
 	}
 
+	// recursively process children
 	child := procs[idx].Child
 	for child != -1 {
 		printTree(child, nhead)
@@ -535,18 +605,44 @@ func printTree(idx int, head string) {
 	config.AtLDepth--
 }
 
+func getTerminalWidthSTTY() (int, error) {
+	cmd := exec.Command("stty", "size")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	parts := strings.Fields(string(out))
+	if len(parts) == 2 {
+		if c, err := strconv.Atoi(parts[1]); err == nil {
+			return c, nil
+		}
+	}
+	return 0, errors.New("terminal width using stty cannot be determined")
+}
+
 // getTerminalWidth gets the terminal width
 func getTerminalWidth() int {
-	if config.Wide {
+
+	if config.Long {
 		return maxLine - 1
 	}
 
 	// Try to get terminal size
+
+	// method 1 : term pkg
+	if width, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+		return width
+	}
+	// method 2 : unix pkg
 	if ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ); err == nil {
 		return int(ws.Col)
 	}
-
-	// Fallback to environment variable
+	// method 3: call stty
+	if width, err := getTerminalWidthSTTY(); err == nil {
+		return width
+	}
+	// method 4: env variable
 	if cols := os.Getenv("COLUMNS"); cols != "" {
 		if c, err := strconv.Atoi(cols); err == nil {
 			return c
@@ -564,6 +660,21 @@ func main() {
 If a user name is specified, all process trees rooted at processes owned by that user are shown.`,
 		Version: version,
 		RunE: func(cmd *cobra.Command, args []string) error {
+
+			if len(args) == 1 {
+				if c, err := strconv.ParseInt(args[0], 10, 64); err == nil {
+					config.IPid = c
+					config.Str = ""
+				} else {
+					config.Str = args[0]
+					config.IPid = -1
+				}
+			}
+
+			if config.IPid == -1 {
+				config.IPid = myPPID
+			}
+
 			// Initialize graphics
 			if config.Graphics < 0 || config.Graphics >= len(treeChars) {
 				return fmt.Errorf("invalid graphics parameter")
@@ -603,10 +714,11 @@ If a user name is specified, all process trees rooted at processes owned by that
 			}
 
 			// Find root PID
-			rootPID = getRootPID()
+			rootPID = getTopPID()
 
 			// Get terminal width
 			config.Columns = getTerminalWidth()
+
 			if config.Columns == 0 {
 				config.Columns = maxLine - 1
 			}
@@ -648,17 +760,46 @@ If a user name is specified, all process trees rooted at processes owned by that
 
 	// Add flags
 	rootCmd.Flags().StringVarP(&config.Input, "file", "f", "", "read input from file (- is stdin)")
-	rootCmd.Flags().IntVarP(&config.Graphics, "graphics", "g", GraphicsASCII, "graphics chars (0=ASCII, 1=IBM-850, 2=VT100, 3=UTF-8)")
-	rootCmd.Flags().IntVarP(&config.MaxLDepth, "level", "l", 100, "print tree to n levels deep")
-	rootCmd.Flags().StringVarP(&config.Name, "user", "u", "", "show only branches containing processes of user")
+	rootCmd.Flags().StringVarP(&config.Name, "user", "u", getCurrentUsername(), "show only branches containing processes of user")
 	rootCmd.Flags().BoolVarP(&config.UOption, "no-root", "U", false, "don't show branches containing only root processes")
-	rootCmd.Flags().StringVarP(&config.Str, "string", "s", "", "show only branches containing process with string in commandline")
-	rootCmd.Flags().Int64VarP(&config.IPid, "pid", "p", -1, "show only branches containing process pid")
-	rootCmd.Flags().BoolVarP(&config.Wide, "wide", "w", false, "wide output, not truncated to window width")
-	rootCmd.Flags().BoolVarP(&config.Debug, "debug", "d", false, "print debugging info to stderr")
+	rootCmd.Flags().BoolVarP(&config.ShowPIDs, "show-pids", "p", false, "show process pids")
+	rootCmd.Flags().IntVarP(&config.MaxLDepth, "depth", "d", 100, "print tree to n levels deep")
+
+	// read this from an ar
+	//rootCmd.Flags().StringVarP(&config.Str, "string", "s", "", "show only branches containing process with string in commandline")
+	rootCmd.Flags().BoolVarP(&config.Long, "long", "l", false, "wide output, not truncated to window width")
+	//rootCmd.Flags().BoolVarP(&config.Debug, "debug", "d", false, "print debugging info to stderr")
+	rootCmd.Flags().IntVarP(&config.Graphics, "graphics", "g", isUnicodeTerminal(), "graphics chars (0=ASCII, 1=IBM-850, 2=VT100, 3=UTF-8)")
+	// add [-A, --ascii, -G, --vt100, -U, --unicode]
+	// add -C or --color to use colors
+	// add -c --compact-not to turn line compaction on/off
+	// things to change - start from the parent pid
+	// maybe -h to high-light the current process in the tree
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func isUnicodeTerminal() int {
+	// Check LANG and LC_CTYPE environment variables
+	keys := []string{"LC_ALL", "LC_CTYPE", "LANG"}
+	for _, key := range keys {
+		val := os.Getenv(key)
+		if strings.Contains(strings.ToUpper(val), "UTF-8") {
+			// UTF
+			return GraphicsUTF8
+		}
+	}
+	// ASCII
+	return GraphicsASCII
+}
+
+func getCurrentUsername() string {
+	usr, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return usr.Username
 }
