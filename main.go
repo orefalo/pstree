@@ -713,7 +713,7 @@ If a user name is specified, all process trees rooted at processes owned by that
 				return fmt.Errorf("no processes read")
 			}
 
-			// Find root PID
+			// Find top PID
 			rootPID = getTopPID()
 
 			// Get terminal width
