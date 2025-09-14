@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
@@ -22,7 +23,7 @@ import (
 
 const (
 	maxLine = 8192
-	version = "4.0.0"
+	version = "1.0.0"
 )
 
 // TreeChars defines the characters used for drawing the tree
@@ -60,30 +61,34 @@ var treeChars = []TreeChars{
 
 // Process represents a single process
 type Process struct {
-	UID     int
-	PID     int
-	PPID    int
-	PGID    int
-	Owner   string
-	Cmd     string
-	Print   bool
-	Parent  int
-	Child   int
-	Sister  int
-	ThCount int
+	UID       int
+	PID       int
+	PPID      int
+	PGID      int
+	Owner     string
+	Cmd       string
+	Print     bool
+	ParentIdx int
+	ChildIdx  int
+	Sister    int
+	ThCount   int
 }
 
 // Config holds the application configuration
 type Config struct {
-	ShowAll bool
-	SOption bool
+	// show all processes
+	AOption bool
+	// filter on a given user
 	UOption bool
-	Owner   string
+	// show pids in the rendering
+	POption bool
+	// filter processes on this owner
+	SearchOwner string
 	// optional string to filter start processes
-	Str      string
-	ShowPIDs bool
+	SearchStr string
 	// optional pid to start from, default parent pid
-	IPid  int
+	SearchPid int
+
 	Input string
 	// current rendering depth
 	AtLDepth int
@@ -192,8 +197,8 @@ func getProcessesDirect() error {
 			}
 		}
 
-		proc.Parent = -1
-		proc.Child = -1
+		proc.ParentIdx = -1
+		proc.ChildIdx = -1
 		proc.Sister = -1
 		proc.Print = false
 
@@ -359,8 +364,8 @@ func getProcesses() error {
 			proc.ThCount = 1
 		}
 
-		proc.Parent = -1
-		proc.Child = -1
+		proc.ParentIdx = -1
+		proc.ChildIdx = -1
 		proc.Sister = -1
 		proc.Print = false
 
@@ -377,6 +382,11 @@ func getProcesses() error {
 
 // getTopPID finds the root process PID
 func getTopPID() int {
+
+	if config.SearchPid != -1 {
+		return config.SearchPid
+	}
+
 	// Look for PID 1
 	for _, proc := range procs {
 		if proc.PID == 1 {
@@ -446,16 +456,16 @@ func getPidIndex(pid int) int {
 	return -1
 }
 
-// makeTree builds the process hierarchy
-func makeTree() {
+// makeTreeHierarchy builds the process hierarchy
+func makeTreeHierarchy() {
 	for i := range procs {
 		parentIdx := getPidIndex(procs[i].PPID)
 		if parentIdx != i && parentIdx != -1 {
-			procs[i].Parent = parentIdx
-			if procs[parentIdx].Child == -1 {
-				procs[parentIdx].Child = i
+			procs[i].ParentIdx = parentIdx
+			if procs[parentIdx].ChildIdx == -1 {
+				procs[parentIdx].ChildIdx = i
 			} else {
-				sister := procs[parentIdx].Child
+				sister := procs[parentIdx].ChildIdx
 				for procs[sister].Sister != -1 {
 					sister = procs[sister].Sister
 				}
@@ -465,10 +475,45 @@ func makeTree() {
 	}
 }
 
+func debugPrintProcs() {
+
+	var (
+		purple    = lipgloss.Color("99")
+		gray      = lipgloss.Color("245")
+		lightGray = lipgloss.Color("241")
+
+		headerStyle  = lipgloss.NewStyle().Foreground(purple).Bold(true).Align(lipgloss.Center)
+		cellStyle    = lipgloss.NewStyle().Padding(0, 1).Width(25)
+		oddRowStyle  = cellStyle.Foreground(gray)
+		evenRowStyle = cellStyle.Foreground(lightGray)
+	)
+
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Foreground(purple)).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			switch {
+			case row == table.HeaderRow:
+				return headerStyle
+			case row%2 == 0:
+				return evenRowStyle
+			default:
+				return oddRowStyle
+			}
+		}).
+		Headers("PID", "PPID", "PROCESS")
+
+	for i := range procs {
+		p := procs[i]
+		t.Row(strconv.Itoa(p.PID), strconv.Itoa(p.PPID), p.Cmd)
+	}
+	fmt.Println(t)
+}
+
 // markChildren recursively marks children for printing
 func markChildren(idx int) {
 	procs[idx].Print = true
-	child := procs[idx].Child
+	child := procs[idx].ChildIdx
 	for child != -1 {
 		markChildren(child)
 		child = procs[child].Sister
@@ -478,31 +523,32 @@ func markChildren(idx int) {
 // markProcs marks processes for printing based on criteria
 func markProcs() {
 	for i := range procs {
-		if config.ShowAll {
-			procs[i].Print = true
+		process := procs[i]
+		if config.AOption {
+			process.Print = true
 		} else {
 			shouldPrintBranch := false
 
 			// Check various criteria
-			if config.Owner != "" && procs[i].Owner == config.Owner {
+			if config.SearchOwner != "" && process.Owner == config.SearchOwner {
 				shouldPrintBranch = true
 			}
-			if config.UOption && procs[i].Owner != "root" {
+			if config.UOption && process.Owner != "root" {
 				shouldPrintBranch = true
 			}
-			if config.IPid != -1 && procs[i].PID == config.IPid {
+			if config.SearchPid != -1 && process.PID == config.SearchPid {
 				shouldPrintBranch = true
 			}
-			if config.SOption && strings.Contains(procs[i].Cmd, config.Str) && procs[i].PID != myPID {
+			if config.SearchStr != "" && strings.Contains(process.Cmd, config.SearchStr) && process.PID != myPID {
 				shouldPrintBranch = true
 			}
 
 			if shouldPrintBranch {
 				// Mark the branch for printing
-				parent := procs[i].Parent
+				parent := process.ParentIdx
 				for parent != -1 {
 					procs[parent].Print = true
-					parent = procs[parent].Parent
+					parent = procs[parent].ParentIdx
 				}
 				// Mark children
 				markChildren(i)
@@ -514,20 +560,21 @@ func markProcs() {
 // dropProcs removes processes that won't be printed from the tree structure
 func dropProcs() {
 	for i := range procs {
-		if procs[i].Print {
+		process := procs[i]
+		if process.Print {
 			// Drop children that won't print
-			child := procs[i].Child
+			child := process.ChildIdx
 			for child != -1 && !procs[child].Print {
 				child = procs[child].Sister
 			}
-			procs[i].Child = child
+			process.ChildIdx = child
 
 			// Drop sisters that won't print
-			sister := procs[i].Sister
+			sister := process.Sister
 			for sister != -1 && !procs[sister].Print {
 				sister = procs[sister].Sister
 			}
-			procs[i].Sister = sister
+			process.Sister = sister
 		}
 	}
 }
@@ -566,7 +613,7 @@ func printTree(idx int, head string) {
 	}
 
 	var pChar string
-	if procs[idx].Child != -1 {
+	if procs[idx].ChildIdx != -1 {
 		pChar = config.TreeChar.P
 	} else {
 		pChar = config.TreeChar.S2
@@ -600,13 +647,204 @@ func printTree(idx int, head string) {
 	}
 
 	// recursively process children
-	child := procs[idx].Child
+	child := procs[idx].ChildIdx
 	for child != -1 {
 		printTree(child, nhead)
 		child = procs[child].Sister
 	}
 
 	config.AtLDepth--
+}
+
+func main() {
+
+	log.Info("main()")
+
+	style := lipgloss.NewStyle().Bold(true).SetString("Hello,")
+	fmt.Println(style.Render("kitty.")) // Hello, kitty.
+	fmt.Println(style.Render("puppy."))
+
+	var rootCmd = &cobra.Command{
+		Use:   "pstree [flags] [pid ...]",
+		Short: "Display running processes as a tree",
+		Long: `pstree shows running processes as a tree. The tree is rooted at either pid or init if pid is omitted.
+If a user name is specified, all process trees rooted at processes owned by that user are shown.`,
+		Version: version,
+		RunE: func(cmd *cobra.Command, args []string) error {
+
+			if len(args) == 1 {
+				if c, err := strconv.Atoi(args[0]); err == nil {
+					config.SearchPid = c
+					config.SearchStr = ""
+				} else {
+					log.Infof("args[o] = %s", args[0])
+					config.SearchStr = args[0]
+					config.SearchPid = -1
+				}
+			}
+
+			log.Infof("init pid %d", config.SearchPid)
+			if config.SearchPid == -1 {
+				config.SearchPid = myPPID
+			}
+			log.Infof("init pid %d", config.SearchPid)
+
+			// Initialize graphics
+			if config.Graphics < 0 || config.Graphics >= len(treeChars) {
+				log.Errorf("invalid graphics parameter")
+				return nil
+			}
+			config.TreeChar = &treeChars[config.Graphics]
+
+			if config.AOption {
+				config.SearchOwner = ""
+				config.SearchPid = -1
+			}
+
+			// Validate user if specified
+			if config.SearchOwner != "" {
+				if _, err := user.Lookup(config.SearchOwner); err != nil {
+					log.Errorf("user '%s' does not exist", config.SearchOwner)
+					return err
+				}
+				config.AOption = false
+			}
+
+			// Set other options
+			if config.UOption || /*config.SOption ||*/ config.SearchPid != -1 {
+				config.AOption = false
+			}
+			if config.SearchStr != "" {
+				/*config.SOption = true*/
+				config.AOption = false
+			}
+
+			// Get processes
+			var err error
+			if runtime.GOOS == "linux" && config.Input == "" {
+				err = getProcessesDirect()
+			} else {
+				err = getProcesses()
+			}
+			if err != nil {
+				return err
+			}
+
+			if nProc == 0 {
+				log.Errorf("no processes read")
+				return nil
+			}
+
+			// Find top PID
+			rootPID = getTopPID()
+
+			// Get terminal width
+			config.Columns = getTerminalWidth()
+
+			if config.Columns == 0 {
+				config.Columns = maxLine - 1
+			}
+
+			// Add space for graphics characters
+			config.Columns += len(config.TreeChar.SG) + len(config.TreeChar.EG)
+			if config.Columns >= maxLine {
+				config.Columns = maxLine - 1
+			}
+
+			// Print initialization string
+			fmt.Print(config.TreeChar.Init)
+
+			// Build and print tree
+			makeTreeHierarchy()
+			debugPrintProcs()
+			markProcs()
+			dropProcs()
+
+			if len(args) == 0 {
+				// No specific PIDs, start from root
+				rootIdx := getPidIndex(rootPID)
+				if rootIdx != -1 {
+					printTree(rootIdx, "")
+				}
+			} else {
+				// Print trees for specified PIDs
+				for _, arg := range args {
+					if pid, err := strconv.Atoi(arg); err == nil {
+						if idx := getPidIndex(pid); idx != -1 {
+							printTree(idx, "")
+						}
+					}
+				}
+			}
+
+			return nil
+		},
+	}
+
+	// Add flags
+	rootCmd.Flags().StringVarP(&config.Input, "file", "f", "", "read input from file (- is stdin)")
+	rootCmd.Flags().StringVarP(&config.SearchOwner, "user", "u", getCurrentUsername(), "show only branches containing processes of user")
+	rootCmd.Flags().BoolVarP(&config.UOption, "no-root", "U", false, "don't show branches containing only root processes")
+	rootCmd.Flags().BoolVarP(&config.POption, "show-pids", "p", false, "show process pids")
+	rootCmd.Flags().IntVarP(&config.MaxLDepth, "depth", "d", 100, "print tree to n levels deep")
+	rootCmd.Flags().BoolVarP(&config.AOption, "all", "a", false, "show all processes")
+
+	// read this from an ar
+	//rootCmd.Flags().StringVarP(&config.SearchStr, "string", "s", "", "show only branches containing process with string in commandline")
+	rootCmd.Flags().BoolVarP(&config.Long, "long", "l", false, "wide output, not truncated to window width")
+	//rootCmd.Flags().BoolVarP(&config.Debug, "debug", "d", false, "print debugging info to stderr")
+	rootCmd.Flags().IntVarP(&config.Graphics, "graphics", "g", isUnicodeTerminal(), "graphics chars (0=ASCII, 1=IBM-850, 2=VT100, 3=UTF-8)")
+	// add [-A, --ascii, -G, --vt100, -U, --unicode]
+	// add -C or --color to use colors
+	// add -c --compact-not to turn line compaction on/off
+	// things to change - start from the parent pid
+	// maybe -h to high-light the current process in the tree
+
+	if err := rootCmd.Execute(); err != nil {
+		log.Errorf("Error: %v\n", err)
+		//fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func init() {
+
+	log.Info("init()")
+
+	config = Config{
+		AOption:   false,
+		MaxLDepth: 100,
+		Graphics:  GraphicsASCII,
+		TreeChar:  &treeChars[GraphicsASCII],
+		SearchPid: -1,
+		SearchStr: "",
+	}
+	myPID = os.Getpid()
+	myPPID = os.Getppid()
+
+}
+
+func isUnicodeTerminal() int {
+	// Check LANG and LC_CTYPE environment variables
+	keys := []string{"LC_ALL", "LC_CTYPE", "LANG"}
+	for _, key := range keys {
+		val := os.Getenv(key)
+		if strings.Contains(strings.ToUpper(val), "UTF-8") {
+			// UTF
+			return GraphicsUTF8
+		}
+	}
+	// ASCII
+	return GraphicsASCII
+}
+
+func getCurrentUsername() string {
+	usr, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	log.Infof("getCurrentUsername %s", usr.Username)
+	return usr.Username
 }
 
 func getTerminalWidthSTTY() (int, error) {
@@ -654,181 +892,4 @@ func getTerminalWidth() int {
 	}
 
 	return 80 // default
-}
-
-func main() {
-
-	log.Info("main()")
-
-	style := lipgloss.NewStyle().Bold(true).SetString("Hello,")
-	fmt.Println(style.Render("kitty.")) // Hello, kitty.
-	fmt.Println(style.Render("puppy."))
-
-	var rootCmd = &cobra.Command{
-		Use:   "pstree [flags] [pid ...]",
-		Short: "Display running processes as a tree",
-		Long: `pstree shows running processes as a tree. The tree is rooted at either pid or init if pid is omitted.
-If a user name is specified, all process trees rooted at processes owned by that user are shown.`,
-		Version: version,
-		RunE: func(cmd *cobra.Command, args []string) error {
-
-			if len(args) == 1 {
-				if c, err := strconv.Atoi(args[0]); err == nil {
-					config.IPid = c
-					config.Str = ""
-				} else {
-					config.Str = args[0]
-					config.IPid = -1
-				}
-			}
-
-			log.Infof("init pid %d", config.IPid)
-			if config.IPid == -1 {
-				config.IPid = myPPID
-			}
-			log.Infof("init pid %d", config.IPid)
-
-			// Initialize graphics
-			if config.Graphics < 0 || config.Graphics >= len(treeChars) {
-				return fmt.Errorf("invalid graphics parameter")
-			}
-			config.TreeChar = &treeChars[config.Graphics]
-
-			// Validate user if specified
-			if config.Owner != "" {
-				if _, err := user.Lookup(config.Owner); err != nil {
-					return fmt.Errorf("user '%s' does not exist", config.Owner)
-				}
-				config.ShowAll = false
-			}
-
-			// Set other options
-			if config.UOption || config.SOption || config.IPid != -1 {
-				config.ShowAll = false
-			}
-			if config.Str != "" {
-				config.SOption = true
-				config.ShowAll = false
-			}
-
-			// Get processes
-			var err error
-			if runtime.GOOS == "linux" && config.Input == "" {
-				err = getProcessesDirect()
-			} else {
-				err = getProcesses()
-			}
-			if err != nil {
-				return err
-			}
-
-			if nProc == 0 {
-				return fmt.Errorf("no processes read")
-			}
-
-			// Find top PID
-			rootPID = getTopPID()
-
-			// Get terminal width
-			config.Columns = getTerminalWidth()
-
-			if config.Columns == 0 {
-				config.Columns = maxLine - 1
-			}
-
-			// Add space for graphics characters
-			config.Columns += len(config.TreeChar.SG) + len(config.TreeChar.EG)
-			if config.Columns >= maxLine {
-				config.Columns = maxLine - 1
-			}
-
-			// Print initialization string
-			fmt.Print(config.TreeChar.Init)
-
-			// Build and print tree
-			makeTree()
-			markProcs()
-			dropProcs()
-
-			if len(args) == 0 {
-				// No specific PIDs, start from root
-				rootIdx := getPidIndex(rootPID)
-				if rootIdx != -1 {
-					printTree(rootIdx, "")
-				}
-			} else {
-				// Print trees for specified PIDs
-				for _, arg := range args {
-					if pid, err := strconv.Atoi(arg); err == nil {
-						if idx := getPidIndex(pid); idx != -1 {
-							printTree(idx, "")
-						}
-					}
-				}
-			}
-
-			return nil
-		},
-	}
-
-	// Add flags
-	rootCmd.Flags().StringVarP(&config.Input, "file", "f", "", "read input from file (- is stdin)")
-	rootCmd.Flags().StringVarP(&config.Owner, "user", "u", getCurrentUsername(), "show only branches containing processes of user")
-	rootCmd.Flags().BoolVarP(&config.UOption, "no-root", "U", false, "don't show branches containing only root processes")
-	rootCmd.Flags().BoolVarP(&config.ShowPIDs, "show-pids", "p", false, "show process pids")
-	rootCmd.Flags().IntVarP(&config.MaxLDepth, "depth", "d", 100, "print tree to n levels deep")
-
-	// read this from an ar
-	//rootCmd.Flags().StringVarP(&config.Str, "string", "s", "", "show only branches containing process with string in commandline")
-	rootCmd.Flags().BoolVarP(&config.Long, "long", "l", false, "wide output, not truncated to window width")
-	//rootCmd.Flags().BoolVarP(&config.Debug, "debug", "d", false, "print debugging info to stderr")
-	rootCmd.Flags().IntVarP(&config.Graphics, "graphics", "g", isUnicodeTerminal(), "graphics chars (0=ASCII, 1=IBM-850, 2=VT100, 3=UTF-8)")
-	// add [-A, --ascii, -G, --vt100, -U, --unicode]
-	// add -C or --color to use colors
-	// add -c --compact-not to turn line compaction on/off
-	// things to change - start from the parent pid
-	// maybe -h to high-light the current process in the tree
-
-	if err := rootCmd.Execute(); err != nil {
-		log.Errorf("Error: %v\n", err)
-		//fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func init() {
-
-	log.Info("init()")
-
-	config = Config{
-		ShowAll:   true,
-		MaxLDepth: 100,
-		Graphics:  GraphicsASCII,
-		TreeChar:  &treeChars[GraphicsASCII],
-		IPid:      -1,
-	}
-	myPID = os.Getpid()
-	myPPID = os.Getppid()
-}
-
-func isUnicodeTerminal() int {
-	// Check LANG and LC_CTYPE environment variables
-	keys := []string{"LC_ALL", "LC_CTYPE", "LANG"}
-	for _, key := range keys {
-		val := os.Getenv(key)
-		if strings.Contains(strings.ToUpper(val), "UTF-8") {
-			// UTF
-			return GraphicsUTF8
-		}
-	}
-	// ASCII
-	return GraphicsASCII
-}
-
-func getCurrentUsername() string {
-	usr, err := user.Current()
-	if err != nil {
-		return ""
-	}
-	return usr.Username
 }
