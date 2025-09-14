@@ -342,11 +342,7 @@ func getProcesses() error {
 					proc.Cmd = fields[4]
 				}
 
-				// strip long paths
-				//lastSlash := strings.LastIndex(proc.Cmd, "/")
-				//if lastSlash != -1 {
-				//	proc.Cmd = proc.Cmd[lastSlash+1:] // Everything after the last slash
-				//}
+				proc.Cmd = stripPath(proc.Cmd)
 
 			}
 		default:
@@ -378,6 +374,16 @@ func getProcesses() error {
 
 	nProc = len(procs)
 	return nil
+}
+
+func stripPath(path string) string {
+
+	//strip long paths
+	lastSlash := strings.LastIndex(path, "/")
+	if lastSlash != -1 {
+		return path[lastSlash+1:] // Everything after the last slash
+	}
+	return path
 }
 
 // getTopPID finds the root process PID
@@ -483,7 +489,7 @@ func debugPrintProcs() {
 		lightGray = lipgloss.Color("241")
 
 		headerStyle  = lipgloss.NewStyle().Foreground(purple).Bold(true).Align(lipgloss.Center)
-		cellStyle    = lipgloss.NewStyle().Padding(0, 1).Width(25)
+		cellStyle    = lipgloss.NewStyle().Padding(0, 1).Width(30)
 		oddRowStyle  = cellStyle.Foreground(gray)
 		evenRowStyle = cellStyle.Foreground(lightGray)
 	)
@@ -501,11 +507,13 @@ func debugPrintProcs() {
 				return oddRowStyle
 			}
 		}).
-		Headers("PID", "PPID", "PROCESS")
+		Headers("idx", "parentIdx", "childIdx", "PID", "PPID", "PROCESS")
 
 	for i := range procs {
 		p := procs[i]
-		t.Row(strconv.Itoa(p.PID), strconv.Itoa(p.PPID), p.Cmd)
+		//if p.Print {
+		t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), p.Cmd)
+		//}
 	}
 	fmt.Println(t)
 }
