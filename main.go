@@ -61,17 +61,20 @@ var treeChars = []TreeChars{
 
 // Process represents a single process
 type Process struct {
-	UID       int
-	PID       int
-	PPID      int
-	PGID      int
-	Owner     string
-	Cmd       string
-	Print     bool
+	UID         int
+	PID         int
+	PPID        int
+	PGID        int
+	Owner       string
+	Cmd         string
+	ThreadCount int
+
+	// line prints when true
+	Print bool
+	// meta data to create and filter the tree structure
 	ParentIdx int
 	ChildIdx  int
-	Sister    int
-	ThCount   int
+	SisterIdx int
 }
 
 // Config holds the application configuration
@@ -89,9 +92,8 @@ type Config struct {
 	// optional pid to start from, default parent pid
 	SearchPid int
 
-	Input string
-	// current rendering depth
-	AtLDepth int
+	//Input string
+
 	// maximum tree depth
 	MaxLDepth int
 
@@ -122,269 +124,14 @@ var (
 	myPID int
 
 	// and my parent pid
-	myPPID  int
+	myPPID int
+
+	// what pid is the rendering starting from
 	rootPID int
+
+	// current rendering depth
+	AtLDepth int = 0
 )
-
-// getProcessesDirect reads processes directly from /proc filesystem (Linux)
-func getProcessesDirect() error {
-	if runtime.GOOS != "linux" {
-		return fmt.Errorf("direct process reading only supported on Linux")
-	}
-
-	procDirs, err := filepath.Glob("/proc/[0-9]*")
-	if err != nil {
-		return err
-	}
-
-	procs = make([]Process, 0, len(procDirs))
-
-	for _, procDir := range procDirs {
-		var proc Process
-
-		// Get UID from directory stat
-		if stat, err := os.Stat(procDir); err == nil {
-			if sysStat, ok := stat.Sys().(*syscall.Stat_t); ok {
-				proc.UID = int(sysStat.Uid)
-				if u, err := user.LookupId(strconv.Itoa(int(proc.UID))); err == nil {
-					proc.Owner = u.Username
-				} else {
-					proc.Owner = fmt.Sprintf("#%d", proc.UID)
-				}
-			}
-		} else {
-			continue // process vanished
-		}
-
-		// Read /proc/PID/stat
-		statPath := filepath.Join(procDir, "stat")
-		statData, err := os.ReadFile(statPath)
-		if err != nil {
-			continue // process vanished
-		}
-
-		statFields := strings.Fields(string(statData))
-		if len(statFields) < 5 {
-			continue
-		}
-
-		if pid, err := strconv.Atoi(statFields[0]); err == nil {
-			proc.PID = pid
-		} else {
-			continue
-		}
-
-		proc.Cmd = strings.Trim(statFields[1], "()")
-
-		if ppid, err := strconv.Atoi(statFields[3]); err == nil {
-			proc.PPID = ppid
-		}
-
-		if pgid, err := strconv.Atoi(statFields[4]); err == nil {
-			proc.PGID = pgid
-		}
-
-		proc.ThCount = 1
-
-		// Read /proc/PID/cmdline for full command
-		cmdlinePath := filepath.Join(procDir, "cmdline")
-		if cmdlineData, err := os.ReadFile(cmdlinePath); err == nil && len(cmdlineData) > 0 {
-			// Replace null bytes with spaces
-			cmdline := strings.ReplaceAll(string(cmdlineData), "\x00", " ")
-			cmdline = strings.TrimSpace(cmdline)
-			if cmdline != "" {
-				proc.Cmd = cmdline
-			}
-		}
-
-		proc.ParentIdx = -1
-		proc.ChildIdx = -1
-		proc.Sister = -1
-		proc.Print = false
-
-		procs = append(procs, proc)
-	}
-
-	nProc = len(procs)
-	return nil
-}
-
-// getProcesses reads processes using ps command
-func getProcesses() error {
-	var cmd *exec.Cmd
-	var scanner *bufio.Scanner
-
-	if config.Input != "" {
-		if config.Input == "-" {
-			scanner = bufio.NewScanner(os.Stdin)
-		} else {
-			file, err := os.Open(config.Input)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-			scanner = bufio.NewScanner(file)
-		}
-	} else {
-		// Use ps command based on OS
-		var psCmd []string
-		switch runtime.GOOS {
-		case "linux":
-			psCmd = []string{"ps", "-eo", "uid,pid,ppid,pgid,args"}
-		case "darwin", "freebsd", "netbsd", "openbsd":
-			psCmd = []string{"ps", "-axwwo", "user,pid,ppid,pgid,wq,comm"}
-		case "aix":
-			psCmd = []string{"ps", "-eko", "uid,pid,ppid,pgid,thcount,args"}
-		default:
-			psCmd = []string{"ps", "-ef"}
-		}
-
-		cmd = exec.Command(psCmd[0], psCmd[1:]...)
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			return err
-		}
-
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		defer cmd.Wait()
-
-		scanner = bufio.NewScanner(stdout)
-	}
-
-	procs = make([]Process, 0)
-
-	// Skip header line
-	if !scanner.Scan() {
-		return fmt.Errorf("no input")
-	}
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if len(line) == 0 {
-			continue
-		}
-
-		var proc Process
-		fields := strings.Fields(line)
-		if len(fields) < 4 {
-			continue
-		}
-
-		// Parse based on OS and ps format
-		switch runtime.GOOS {
-		case "linux", "aix":
-			if uid, err := strconv.Atoi(fields[0]); err == nil {
-				proc.UID = uid
-				if u, err := user.LookupId(fields[0]); err == nil {
-					proc.Owner = u.Username
-				} else {
-					proc.Owner = fmt.Sprintf("#%s", fields[0])
-				}
-			}
-			if pid, err := strconv.Atoi(fields[1]); err == nil {
-				proc.PID = pid
-			}
-			if ppid, err := strconv.Atoi(fields[2]); err == nil {
-				proc.PPID = ppid
-			}
-			if pgid, err := strconv.Atoi(fields[3]); err == nil {
-				proc.PGID = pgid
-			}
-			if len(fields) > 4 {
-				if runtime.GOOS == "aix" && len(fields) > 5 {
-					if thcount, err := strconv.Atoi(fields[4]); err == nil {
-						proc.ThCount = thcount
-					}
-					proc.Cmd = strings.Join(fields[5:], " ")
-				} else {
-					proc.ThCount = 1
-					proc.Cmd = strings.Join(fields[4:], " ")
-				}
-			}
-		case "freebsd", "netbsd", "openbsd":
-			proc.Owner = fields[0]
-			if pid, err := strconv.Atoi(fields[1]); err == nil {
-				proc.PID = pid
-			}
-			if ppid, err := strconv.Atoi(fields[2]); err == nil {
-				proc.PPID = ppid
-			}
-			if pgid, err := strconv.Atoi(fields[3]); err == nil {
-				proc.PGID = pgid
-			}
-			if len(fields) > 4 {
-				proc.Cmd = strings.Join(fields[4:], " ")
-			}
-			proc.ThCount = 1
-		case "darwin":
-			proc.Owner = fields[0]
-			if pid, err := strconv.Atoi(fields[1]); err == nil {
-				proc.PID = pid
-			}
-			if ppid, err := strconv.Atoi(fields[2]); err == nil {
-				proc.PPID = ppid
-			}
-			if pgid, err := strconv.Atoi(fields[3]); err == nil {
-				proc.PGID = pgid
-			}
-
-			if len(fields) > 4 {
-
-				if len(fields) > 5 {
-					if thcount, err := strconv.Atoi(fields[4]); err == nil {
-						proc.ThCount = thcount
-					}
-					proc.Cmd = fields[5]
-				} else {
-					proc.ThCount = 1
-					proc.Cmd = fields[4]
-				}
-
-				proc.Cmd = stripPath(proc.Cmd)
-
-			}
-		default:
-			// Default ps -ef format
-			proc.Owner = fields[0]
-			if pid, err := strconv.Atoi(fields[1]); err == nil {
-				proc.PID = pid
-			}
-			if ppid, err := strconv.Atoi(fields[2]); err == nil {
-				proc.PPID = ppid
-			}
-			if len(fields) > 7 {
-				proc.Cmd = strings.Join(fields[7:], " ")
-			}
-			proc.ThCount = 1
-		}
-
-		proc.ParentIdx = -1
-		proc.ChildIdx = -1
-		proc.Sister = -1
-		proc.Print = false
-
-		procs = append(procs, proc)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-
-	nProc = len(procs)
-	return nil
-}
-
-func stripPath(path string) string {
-
-	//strip long paths
-	lastSlash := strings.LastIndex(path, "/")
-	if lastSlash != -1 {
-		return path[lastSlash+1:] // Everything after the last slash
-	}
-	return path
-}
 
 // getTopPID finds the root process PID
 func getTopPID() int {
@@ -426,39 +173,17 @@ func getTopPID() int {
 	return 0
 }
 
-// getTopPID finds the root process PID
-func getPidFromProcs(pid int) int {
-
-	// Look for pid
-	for _, proc := range procs {
-		if proc.PID == pid {
-			return pid
-		}
-	}
-
-	// look for pid as a ppid
-	for _, proc := range procs {
-		if proc.PPID == pid {
-			return proc.PID
-		}
-	}
-
-	fmt.Fprintf(os.Stderr, "pstree: No process found with PID == %d\n", pid)
-	os.Exit(1)
-	return 0
-}
-
 // getPidIndex finds the index of a process by PID
 func getPidIndex(pid int) int {
 	for i := len(procs) - 1; i >= 0; i-- {
 		if procs[i].PID == pid {
 			if pid != 1 {
-				fmt.Printf("DEBUG: getPidIndex(%d)=%d\n", pid, i)
+				log.Debugf("getPidIndex(%d)=%d\n", pid, i)
 			}
 			return i
 		}
 	}
-	fmt.Printf("DEBUG: getPidIndex(%d)=-1\n", pid)
+	log.Debugf("getPidIndex(%d)=-1\n", pid)
 	return -1
 }
 
@@ -472,16 +197,16 @@ func makeTreeHierarchy() {
 				procs[parentIdx].ChildIdx = i
 			} else {
 				sister := procs[parentIdx].ChildIdx
-				for procs[sister].Sister != -1 {
-					sister = procs[sister].Sister
+				for procs[sister].SisterIdx != -1 {
+					sister = procs[sister].SisterIdx
 				}
-				procs[sister].Sister = i
+				procs[sister].SisterIdx = i
 			}
 		}
 	}
 }
 
-func debugPrintProcs() {
+func debugPrintProcs(enforcePrintFlag bool) {
 
 	var (
 		purple    = lipgloss.Color("99")
@@ -511,9 +236,9 @@ func debugPrintProcs() {
 
 	for i := range procs {
 		p := procs[i]
-		//if p.Print {
-		t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), p.Cmd)
-		//}
+		if enforcePrintFlag && p.Print {
+			t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), p.Cmd)
+		}
 	}
 	fmt.Println(t)
 }
@@ -524,7 +249,7 @@ func markChildren(idx int) {
 	child := procs[idx].ChildIdx
 	for child != -1 {
 		markChildren(child)
-		child = procs[child].Sister
+		child = procs[child].SisterIdx
 	}
 }
 
@@ -573,16 +298,16 @@ func dropProcs() {
 			// Drop children that won't print
 			child := process.ChildIdx
 			for child != -1 && !procs[child].Print {
-				child = procs[child].Sister
+				child = procs[child].SisterIdx
 			}
 			process.ChildIdx = child
 
 			// Drop sisters that won't print
-			sister := process.Sister
-			for sister != -1 && !procs[sister].Print {
-				sister = procs[sister].Sister
+			tmp := process.SisterIdx
+			for tmp != -1 && !procs[tmp].Print {
+				tmp = procs[tmp].SisterIdx
 			}
-			process.Sister = sister
+			process.SisterIdx = tmp
 		}
 	}
 }
@@ -593,15 +318,15 @@ func printTree(idx int, head string) {
 		return
 	}
 
-	if config.AtLDepth == config.MaxLDepth {
+	if AtLDepth == config.MaxLDepth {
 		return
 	}
 
-	config.AtLDepth++
+	AtLDepth++
 
 	var thread string
-	if procs[idx].ThCount > 1 {
-		thread = fmt.Sprintf("[%d]", procs[idx].ThCount)
+	if procs[idx].ThreadCount > 1 {
+		thread = fmt.Sprintf("[%d]", procs[idx].ThreadCount)
 	}
 
 	var pgl string
@@ -614,7 +339,7 @@ func printTree(idx int, head string) {
 	var barChar string
 	if head == "" {
 		barChar = ""
-	} else if procs[idx].Sister != -1 {
+	} else if procs[idx].SisterIdx != -1 {
 		barChar = config.TreeChar.BarC
 	} else {
 		barChar = config.TreeChar.BarL
@@ -648,7 +373,7 @@ func printTree(idx int, head string) {
 	var nhead string
 	if head == "" {
 		nhead = ""
-	} else if procs[idx].Sister != -1 {
+	} else if procs[idx].SisterIdx != -1 {
 		nhead = head + config.TreeChar.Bar + " "
 	} else {
 		nhead = head + "  "
@@ -658,19 +383,15 @@ func printTree(idx int, head string) {
 	child := procs[idx].ChildIdx
 	for child != -1 {
 		printTree(child, nhead)
-		child = procs[child].Sister
+		child = procs[child].SisterIdx
 	}
 
-	config.AtLDepth--
+	AtLDepth--
 }
 
 func main() {
 
 	log.Info("main()")
-
-	style := lipgloss.NewStyle().Bold(true).SetString("Hello,")
-	fmt.Println(style.Render("kitty.")) // Hello, kitty.
-	fmt.Println(style.Render("puppy."))
 
 	var rootCmd = &cobra.Command{
 		Use:   "pstree [flags] [pid ...]",
@@ -682,8 +403,8 @@ If a user name is specified, all process trees rooted at processes owned by that
 
 			if len(args) == 1 {
 				if c, err := strconv.Atoi(args[0]); err == nil {
-					config.SearchPid = c
 					config.SearchStr = ""
+					config.SearchPid = c
 				} else {
 					log.Infof("args[o] = %s", args[0])
 					config.SearchStr = args[0]
@@ -691,11 +412,10 @@ If a user name is specified, all process trees rooted at processes owned by that
 				}
 			}
 
-			log.Infof("init pid %d", config.SearchPid)
 			if config.SearchPid == -1 {
 				config.SearchPid = myPPID
 			}
-			log.Infof("init pid %d", config.SearchPid)
+			log.Infof("config.SearchPid = %d", config.SearchPid)
 
 			// Initialize graphics
 			if config.Graphics < 0 || config.Graphics >= len(treeChars) {
@@ -718,18 +438,9 @@ If a user name is specified, all process trees rooted at processes owned by that
 				config.AOption = false
 			}
 
-			// Set other options
-			if config.UOption || /*config.SOption ||*/ config.SearchPid != -1 {
-				config.AOption = false
-			}
-			if config.SearchStr != "" {
-				/*config.SOption = true*/
-				config.AOption = false
-			}
-
 			// Get processes
 			var err error
-			if runtime.GOOS == "linux" && config.Input == "" {
+			if runtime.GOOS == "linux" {
 				err = getProcessesDirect()
 			} else {
 				err = getProcesses()
@@ -743,54 +454,61 @@ If a user name is specified, all process trees rooted at processes owned by that
 				return nil
 			}
 
-			// Find top PID
-			rootPID = getTopPID()
-
-			// Get terminal width
-			config.Columns = getTerminalWidth()
-
-			if config.Columns == 0 {
-				config.Columns = maxLine - 1
+			// if we are filtering of a pid, ensure th epid exist.
+			// otherwise, if not found, it's a string
+			if config.SearchPid != -1 {
+				if getPidIndex(config.SearchPid) == -1 {
+					// pid not found, it's a string search
+					config.SearchStr = args[0]
+					config.SearchPid = -1
+				}
 			}
 
-			// Add space for graphics characters
-			config.Columns += len(config.TreeChar.SG) + len(config.TreeChar.EG)
-			if config.Columns >= maxLine {
-				config.Columns = maxLine - 1
-			}
+			calculateTerminalWidth()
 
 			// Print initialization string
 			fmt.Print(config.TreeChar.Init)
 
 			// Build and print tree
 			makeTreeHierarchy()
-			debugPrintProcs()
+			debugPrintProcs(false)
 			markProcs()
+			debugPrintProcs(true)
 			dropProcs()
+			debugPrintProcs(true)
 
-			if len(args) == 0 {
-				// No specific PIDs, start from root
-				rootIdx := getPidIndex(rootPID)
-				if rootIdx != -1 {
-					printTree(rootIdx, "")
-				}
-			} else {
-				// Print trees for specified PIDs
-				for _, arg := range args {
-					if pid, err := strconv.Atoi(arg); err == nil {
-						if idx := getPidIndex(pid); idx != -1 {
-							printTree(idx, "")
-						}
-					}
-				}
+			// Find top PID
+			rootPID = getTopPID()
+			rootIdx := getPidIndex(rootPID)
+			if rootIdx != -1 {
+				printTree(rootIdx, "")
 			}
+
+			//
+			//if len(args) == 0 {
+			//	// No specific PIDs, start from root
+			//	rootIdx := getPidIndex(rootPID)
+			//	if rootIdx != -1 {
+			//		printTree(rootIdx, "")
+			//	}
+			//} else {
+			//	// Print trees for specified PIDs
+			//	for _, arg := range args {
+			//		if pid, err := strconv.Atoi(arg); err == nil {
+			//			if idx := getPidIndex(pid); idx != -1 {
+			//				printTree(idx, "")
+			//			}
+			//		}
+			//
+			//	}
+			//}
 
 			return nil
 		},
 	}
 
 	// Add flags
-	rootCmd.Flags().StringVarP(&config.Input, "file", "f", "", "read input from file (- is stdin)")
+	//rootCmd.Flags().StringVarP(&config.Input, "file", "f", "", "read input from file (- is stdin)")
 	rootCmd.Flags().StringVarP(&config.SearchOwner, "user", "u", getCurrentUsername(), "show only branches containing processes of user")
 	rootCmd.Flags().BoolVarP(&config.UOption, "no-root", "U", false, "don't show branches containing only root processes")
 	rootCmd.Flags().BoolVarP(&config.POption, "show-pids", "p", false, "show process pids")
@@ -813,6 +531,22 @@ If a user name is specified, all process trees rooted at processes owned by that
 		//fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func calculateTerminalWidth() {
+	// Get terminal width
+	config.Columns = getTerminalWidth()
+	if config.Columns == 0 {
+		config.Columns = maxLine - 1
+	}
+
+	// Add space for graphics characters
+	config.Columns += len(config.TreeChar.SG) + len(config.TreeChar.EG)
+	if config.Columns >= maxLine {
+		config.Columns = maxLine - 1
+	}
+
+	log.Infof("columns: %d", config.Columns)
 }
 
 func init() {
@@ -900,4 +634,265 @@ func getTerminalWidth() int {
 	}
 
 	return 80 // default
+}
+
+// getProcessesDirect reads processes directly from /proc filesystem (Linux)
+func getProcessesDirect() error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("direct process reading only supported on Linux")
+	}
+
+	procDirs, err := filepath.Glob("/proc/[0-9]*")
+	if err != nil {
+		return err
+	}
+
+	procs = make([]Process, 0, len(procDirs))
+
+	for _, procDir := range procDirs {
+		var proc Process
+
+		// Get UID from directory stat
+		if stat, err := os.Stat(procDir); err == nil {
+			if sysStat, ok := stat.Sys().(*syscall.Stat_t); ok {
+				proc.UID = int(sysStat.Uid)
+				if u, err := user.LookupId(strconv.Itoa(int(proc.UID))); err == nil {
+					proc.Owner = u.Username
+				} else {
+					proc.Owner = fmt.Sprintf("#%d", proc.UID)
+				}
+			}
+		} else {
+			continue // process vanished
+		}
+
+		// Read /proc/PID/stat
+		statPath := filepath.Join(procDir, "stat")
+		statData, err := os.ReadFile(statPath)
+		if err != nil {
+			continue // process vanished
+		}
+
+		statFields := strings.Fields(string(statData))
+		if len(statFields) < 5 {
+			continue
+		}
+
+		if pid, err := strconv.Atoi(statFields[0]); err == nil {
+			proc.PID = pid
+		} else {
+			continue
+		}
+
+		proc.Cmd = strings.Trim(statFields[1], "()")
+
+		if ppid, err := strconv.Atoi(statFields[3]); err == nil {
+			proc.PPID = ppid
+		}
+
+		if pgid, err := strconv.Atoi(statFields[4]); err == nil {
+			proc.PGID = pgid
+		}
+
+		proc.ThreadCount = 1
+
+		// Read /proc/PID/cmdline for full command
+		cmdlinePath := filepath.Join(procDir, "cmdline")
+		if cmdlineData, err := os.ReadFile(cmdlinePath); err == nil && len(cmdlineData) > 0 {
+			// Replace null bytes with spaces
+			cmdline := strings.ReplaceAll(string(cmdlineData), "\x00", " ")
+			cmdline = strings.TrimSpace(cmdline)
+			if cmdline != "" {
+				proc.Cmd = cmdline
+			}
+		}
+
+		proc.ParentIdx = -1
+		proc.ChildIdx = -1
+		proc.SisterIdx = -1
+		proc.Print = false
+
+		procs = append(procs, proc)
+	}
+
+	nProc = len(procs)
+	return nil
+}
+
+// getProcesses reads processes using ps command
+func getProcesses() error {
+	var cmd *exec.Cmd
+	var scanner *bufio.Scanner
+
+	//if config.SearchStr != "" {
+	//	if config.SearchStr == "-" {
+	//		scanner = bufio.NewScanner(os.Stdin)
+	//	}
+	//	//else {
+	//	//	file, err := os.Open(config.Input)
+	//	//	if err != nil {
+	//	//		return err
+	//	//	}
+	//	//	defer file.Close()
+	//	//	scanner = bufio.NewScanner(file)
+	//	//}
+	//} else {
+	// Use ps command based on OS
+	var psCmd []string
+	switch runtime.GOOS {
+	case "linux":
+		psCmd = []string{"ps", "-eo", "uid,pid,ppid,pgid,args"}
+	case "darwin", "freebsd", "netbsd", "openbsd":
+		psCmd = []string{"ps", "-axwwo", "user,pid,ppid,pgid,wq,comm"}
+	case "aix":
+		psCmd = []string{"ps", "-eko", "uid,pid,ppid,pgid,thcount,args"}
+	default:
+		psCmd = []string{"ps", "-ef"}
+	}
+
+	cmd = exec.Command(psCmd[0], psCmd[1:]...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	defer cmd.Wait()
+
+	scanner = bufio.NewScanner(stdout)
+	//}
+
+	procs = make([]Process, 0)
+
+	// Skip header line
+	if !scanner.Scan() {
+		return fmt.Errorf("no input")
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) == 0 {
+			continue
+		}
+
+		var proc Process
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+
+		// Parse based on OS and ps format
+		switch runtime.GOOS {
+		case "linux", "aix":
+			if uid, err := strconv.Atoi(fields[0]); err == nil {
+				proc.UID = uid
+				if u, err := user.LookupId(fields[0]); err == nil {
+					proc.Owner = u.Username
+				} else {
+					proc.Owner = fmt.Sprintf("#%s", fields[0])
+				}
+			}
+			if pid, err := strconv.Atoi(fields[1]); err == nil {
+				proc.PID = pid
+			}
+			if ppid, err := strconv.Atoi(fields[2]); err == nil {
+				proc.PPID = ppid
+			}
+			if pgid, err := strconv.Atoi(fields[3]); err == nil {
+				proc.PGID = pgid
+			}
+			if len(fields) > 4 {
+				if runtime.GOOS == "aix" && len(fields) > 5 {
+					if thcount, err := strconv.Atoi(fields[4]); err == nil {
+						proc.ThreadCount = thcount
+					}
+					proc.Cmd = strings.Join(fields[5:], " ")
+				} else {
+					proc.ThreadCount = 1
+					proc.Cmd = strings.Join(fields[4:], " ")
+				}
+			}
+		case "freebsd", "netbsd", "openbsd":
+			proc.Owner = fields[0]
+			if pid, err := strconv.Atoi(fields[1]); err == nil {
+				proc.PID = pid
+			}
+			if ppid, err := strconv.Atoi(fields[2]); err == nil {
+				proc.PPID = ppid
+			}
+			if pgid, err := strconv.Atoi(fields[3]); err == nil {
+				proc.PGID = pgid
+			}
+			if len(fields) > 4 {
+				proc.Cmd = strings.Join(fields[4:], " ")
+			}
+			proc.ThreadCount = 1
+		case "darwin":
+			proc.Owner = fields[0]
+			if pid, err := strconv.Atoi(fields[1]); err == nil {
+				proc.PID = pid
+			}
+			if ppid, err := strconv.Atoi(fields[2]); err == nil {
+				proc.PPID = ppid
+			}
+			if pgid, err := strconv.Atoi(fields[3]); err == nil {
+				proc.PGID = pgid
+			}
+
+			if len(fields) > 4 {
+
+				if len(fields) > 5 {
+					if thcount, err := strconv.Atoi(fields[4]); err == nil {
+						proc.ThreadCount = thcount
+					}
+					proc.Cmd = fields[5]
+				} else {
+					proc.ThreadCount = 1
+					proc.Cmd = fields[4]
+				}
+
+				proc.Cmd = stripPath(proc.Cmd)
+
+			}
+		default:
+			// Default ps -ef format
+			proc.Owner = fields[0]
+			if pid, err := strconv.Atoi(fields[1]); err == nil {
+				proc.PID = pid
+			}
+			if ppid, err := strconv.Atoi(fields[2]); err == nil {
+				proc.PPID = ppid
+			}
+			if len(fields) > 7 {
+				proc.Cmd = strings.Join(fields[7:], " ")
+			}
+			proc.ThreadCount = 1
+		}
+
+		proc.ParentIdx = -1
+		proc.ChildIdx = -1
+		proc.SisterIdx = -1
+		proc.Print = false
+
+		procs = append(procs, proc)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	nProc = len(procs)
+	return nil
+}
+
+func stripPath(path string) string {
+
+	//strip long paths
+	lastSlash := strings.LastIndex(path, "/")
+	if lastSlash != -1 {
+		return path[lastSlash+1:] // Everything after the last slash
+	}
+	return path
 }
