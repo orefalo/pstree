@@ -87,6 +87,8 @@ type Config struct {
 	POption bool
 	// debug option
 	DOption bool
+	// For long output (no width truncation)
+	WOption bool
 	// filter processes on this owner
 	SearchOwner string
 	// optional string to filter start processes
@@ -94,18 +96,15 @@ type Config struct {
 	// optional pid to start from, default parent pid
 	SearchPid int
 
-	//Input string
-
 	// maximum tree depth
 	MaxLDepth int
 
 	// TODO: Compress output
-	Compress bool
+	//Compress bool
 	//Debug    bool
 	// character set selector in treeChars
 	Graphics int
-	// For long output (no width truncation)
-	Long bool
+
 	// terminal width in columns
 	Columns int
 	// character set used to render the tree
@@ -495,25 +494,6 @@ If a user name is specified, all process trees rooted at processes owned by that
 				printTree(rootIdx, "")
 			}
 
-			//
-			//if len(args) == 0 {
-			//	// No specific PIDs, start from root
-			//	rootIdx := getPidIndex(rootPID)
-			//	if rootIdx != -1 {
-			//		printTree(rootIdx, "")
-			//	}
-			//} else {
-			//	// Print trees for specified PIDs
-			//	for _, arg := range args {
-			//		if pid, err := strconv.Atoi(arg); err == nil {
-			//			if idx := getPidIndex(pid); idx != -1 {
-			//				printTree(idx, "")
-			//			}
-			//		}
-			//
-			//	}
-			//}
-
 			return nil
 		},
 	}
@@ -524,7 +504,7 @@ If a user name is specified, all process trees rooted at processes owned by that
 	rootCmd.Flags().BoolVarP(&config.POption, "show-pids", "p", false, "show process pids")
 	rootCmd.Flags().IntVarP(&config.MaxLDepth, "level", "l", 100, "print tree to n levels deep")
 	rootCmd.Flags().BoolVarP(&config.AOption, "all", "a", false, "show all processes")
-	rootCmd.Flags().BoolVarP(&config.Long, "wide", "w", false, "wide output, not truncated to window width")
+	rootCmd.Flags().BoolVarP(&config.WOption, "wide", "w", false, "wide output, not truncated to window width")
 	rootCmd.Flags().BoolVarP(&config.DOption, "debug", "d", false, "print debugging info to stderr")
 	rootCmd.Flags().IntVarP(&config.Graphics, "graphics", "g", isUnicodeTerminal(), "graphics chars (0=ASCII, 1=IBM-850, 2=VT100, 3=UTF-8)")
 	// add [-A, --ascii, -G, --vt100, -U, --unicode]
@@ -616,7 +596,7 @@ func getTerminalWidthSTTY() (int, error) {
 // getTerminalWidth gets the terminal width
 func getTerminalWidth() int {
 
-	if config.Long {
+	if config.WOption {
 		return maxLine - 1
 	}
 
