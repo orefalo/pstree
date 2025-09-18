@@ -503,7 +503,7 @@ func debugPrintProcs(enforcePrintFlag bool) {
 			lightGray = lipgloss.Color("241")
 
 			headerStyle  = lipgloss.NewStyle().Foreground(purple).Bold(true).Align(lipgloss.Center)
-			cellStyle    = lipgloss.NewStyle().Padding(0, 1).Width(30)
+			cellStyle    = lipgloss.NewStyle().Padding(0, 1)
 			oddRowStyle  = cellStyle.Foreground(gray)
 			evenRowStyle = cellStyle.Foreground(lightGray)
 		)

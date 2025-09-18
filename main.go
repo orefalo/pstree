@@ -77,7 +77,7 @@ type Config struct {
 	POption bool
 	// debug option
 	DOption bool
-	// For long output (no width truncation)
+	// For wide output (no width truncation)
 	WOption bool
 	// filter processes on this owner
 	SearchOwner string
@@ -85,16 +85,11 @@ type Config struct {
 	SearchStr string
 	// optional pid to start from, default parent pid
 	SearchPid int
-
 	// maximum tree depth
 	MaxLDepth int
 
-	// TODO: Compress output
-	//Compress bool
-	//Debug    bool
 	// character set selector in treeChars
 	Graphics int
-
 	// terminal width in columns
 	Columns int
 	// character set used to render the tree
@@ -112,7 +107,7 @@ var (
 	myPPID int
 
 	// what pid is the rendering starting from
-	rootPID int
+	//startPID int
 )
 
 func init() {
@@ -233,11 +228,6 @@ If a user name is specified, all process trees rooted at processes owned by that
 	rootCmd.Flags().BoolVarP(&config.WOption, "wide", "w", false, "wide output, not truncated to window width")
 	rootCmd.Flags().BoolVarP(&config.DOption, "debug", "d", false, "print debugging info to stderr")
 	rootCmd.Flags().IntVarP(&config.Graphics, "graphics", "g", isUnicodeTerminal(), "graphics chars (0=ASCII, 1=IBM-850, 2=VT100, 3=UTF-8)")
-	// add [-A, --ascii, -G, --vt100, -U, --unicode]
-	// add -C or --color to use colors
-	// add -c --compact-not to turn line compaction on/off
-	// things to change - start from the parent pid
-	// maybe -h to high-light the current process in the tree
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Errorf("Error: %v", err)
@@ -251,15 +241,12 @@ func RenderTree() {
 
 	// Build and print tree
 	makeTreeHierarchy()
-	debugPrintProcs(false)
 	markProcs()
-	debugPrintProcs(true)
 	dropProcs()
 	debugPrintProcs(true)
 
 	// Find top PID
-	rootPID = getTopPID()
-	rootIdx := getPidIndex(rootPID)
+	rootIdx := getPidIndex(getTopPID())
 	if rootIdx != -1 {
 		printTree(rootIdx, "")
 	}
