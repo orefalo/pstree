@@ -85,6 +85,8 @@ type Config struct {
 	UOption bool
 	// show pids in the rendering
 	POption bool
+	// debug option
+	DOption bool
 	// filter processes on this owner
 	SearchOwner string
 	// optional string to filter start processes
@@ -401,6 +403,10 @@ If a user name is specified, all process trees rooted at processes owned by that
 		Version: version,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			if config.DOption {
+				log.SetLevel(log.DebugLevel)
+			}
+
 			if len(args) == 1 {
 				if c, err := strconv.Atoi(args[0]); err == nil {
 					config.SearchStr = ""
@@ -413,6 +419,7 @@ If a user name is specified, all process trees rooted at processes owned by that
 			}
 
 			if config.SearchPid == -1 {
+				// default top pid to the parent pid
 				config.SearchPid = myPPID
 			}
 			log.Infof("config.SearchPid = %d", config.SearchPid)
@@ -448,6 +455,8 @@ If a user name is specified, all process trees rooted at processes owned by that
 			if err != nil {
 				return err
 			}
+
+			log.Debugf("nProcs = %d", nProc)
 
 			if nProc == 0 {
 				log.Errorf("no processes read")
@@ -508,17 +517,13 @@ If a user name is specified, all process trees rooted at processes owned by that
 	}
 
 	// Add flags
-	//rootCmd.Flags().StringVarP(&config.Input, "file", "f", "", "read input from file (- is stdin)")
 	rootCmd.Flags().StringVarP(&config.SearchOwner, "user", "u", getCurrentUsername(), "show only branches containing processes of user")
 	rootCmd.Flags().BoolVarP(&config.UOption, "no-root", "U", false, "don't show branches containing only root processes")
 	rootCmd.Flags().BoolVarP(&config.POption, "show-pids", "p", false, "show process pids")
-	rootCmd.Flags().IntVarP(&config.MaxLDepth, "depth", "d", 100, "print tree to n levels deep")
+	rootCmd.Flags().IntVarP(&config.MaxLDepth, "maxdepth", "m", 100, "print tree to n levels deep")
 	rootCmd.Flags().BoolVarP(&config.AOption, "all", "a", false, "show all processes")
-
-	// read this from an ar
-	//rootCmd.Flags().StringVarP(&config.SearchStr, "string", "s", "", "show only branches containing process with string in commandline")
 	rootCmd.Flags().BoolVarP(&config.Long, "long", "l", false, "wide output, not truncated to window width")
-	//rootCmd.Flags().BoolVarP(&config.Debug, "debug", "d", false, "print debugging info to stderr")
+	rootCmd.Flags().BoolVarP(&config.Debug, "debug", "d", false, "print debugging info to stderr")
 	rootCmd.Flags().IntVarP(&config.Graphics, "graphics", "g", isUnicodeTerminal(), "graphics chars (0=ASCII, 1=IBM-850, 2=VT100, 3=UTF-8)")
 	// add [-A, --ascii, -G, --vt100, -U, --unicode]
 	// add -C or --color to use colors
@@ -561,6 +566,7 @@ func init() {
 		SearchPid: -1,
 		SearchStr: "",
 	}
+
 	myPID = os.Getpid()
 	myPPID = os.Getppid()
 
