@@ -101,7 +101,7 @@ type Config struct {
 
 	// TODO: Compress output
 	Compress bool
-	Debug    bool
+	//Debug    bool
 	// character set selector in treeChars
 	Graphics int
 	// For long output (no width truncation)
@@ -242,7 +242,7 @@ func debugPrintProcs(enforcePrintFlag bool) {
 			t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), p.Cmd)
 		}
 	}
-	fmt.Println(t)
+	log.Debug(t)
 }
 
 // markChildren recursively marks children for printing
@@ -403,8 +403,10 @@ If a user name is specified, all process trees rooted at processes owned by that
 		Version: version,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			log.Infof("DOption %v", config.DOption)
 			if config.DOption {
 				log.SetLevel(log.DebugLevel)
+				log.Debugf("H1")
 			}
 
 			if len(args) == 1 {
@@ -412,7 +414,7 @@ If a user name is specified, all process trees rooted at processes owned by that
 					config.SearchStr = ""
 					config.SearchPid = c
 				} else {
-					log.Infof("args[o] = %s", args[0])
+					log.Infof("args[0] = %s", args[0])
 					config.SearchStr = args[0]
 					config.SearchPid = -1
 				}
@@ -520,10 +522,10 @@ If a user name is specified, all process trees rooted at processes owned by that
 	rootCmd.Flags().StringVarP(&config.SearchOwner, "user", "u", getCurrentUsername(), "show only branches containing processes of user")
 	rootCmd.Flags().BoolVarP(&config.UOption, "no-root", "U", false, "don't show branches containing only root processes")
 	rootCmd.Flags().BoolVarP(&config.POption, "show-pids", "p", false, "show process pids")
-	rootCmd.Flags().IntVarP(&config.MaxLDepth, "maxdepth", "m", 100, "print tree to n levels deep")
+	rootCmd.Flags().IntVarP(&config.MaxLDepth, "level", "l", 100, "print tree to n levels deep")
 	rootCmd.Flags().BoolVarP(&config.AOption, "all", "a", false, "show all processes")
-	rootCmd.Flags().BoolVarP(&config.Long, "long", "l", false, "wide output, not truncated to window width")
-	rootCmd.Flags().BoolVarP(&config.Debug, "debug", "d", false, "print debugging info to stderr")
+	rootCmd.Flags().BoolVarP(&config.Long, "wide", "w", false, "wide output, not truncated to window width")
+	rootCmd.Flags().BoolVarP(&config.DOption, "debug", "d", false, "print debugging info to stderr")
 	rootCmd.Flags().IntVarP(&config.Graphics, "graphics", "g", isUnicodeTerminal(), "graphics chars (0=ASCII, 1=IBM-850, 2=VT100, 3=UTF-8)")
 	// add [-A, --ascii, -G, --vt100, -U, --unicode]
 	// add -C or --color to use colors
@@ -730,19 +732,6 @@ func getProcesses() error {
 	var cmd *exec.Cmd
 	var scanner *bufio.Scanner
 
-	//if config.SearchStr != "" {
-	//	if config.SearchStr == "-" {
-	//		scanner = bufio.NewScanner(os.Stdin)
-	//	}
-	//	//else {
-	//	//	file, err := os.Open(config.Input)
-	//	//	if err != nil {
-	//	//		return err
-	//	//	}
-	//	//	defer file.Close()
-	//	//	scanner = bufio.NewScanner(file)
-	//	//}
-	//} else {
 	// Use ps command based on OS
 	var psCmd []string
 	switch runtime.GOOS {
@@ -768,7 +757,6 @@ func getProcesses() error {
 	defer cmd.Wait()
 
 	scanner = bufio.NewScanner(stdout)
-	//}
 
 	procs = make([]Process, 0)
 
