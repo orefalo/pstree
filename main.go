@@ -1,4 +1,4 @@
-package pstree
+package main
 
 import (
 	"fmt"
@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	maxLine = 8192
 	version = "1.0.0"
 )
 
@@ -193,7 +192,7 @@ If a user name is specified, all process trees rooted at processes owned by that
 			// Get processes
 			var err error
 			if runtime.GOOS == "linux" {
-				err = getProcessesDirect()
+				err = getProcessesLinux()
 			} else {
 				err = getProcesses()
 			}
@@ -218,25 +217,8 @@ If a user name is specified, all process trees rooted at processes owned by that
 				}
 			}
 
-			calculateTerminalWidth()
-
-			// Print initialization string
-			fmt.Print(config.TreeChar.Init)
-
-			// Build and print tree
-			makeTreeHierarchy()
-			debugPrintProcs(false)
-			markProcs()
-			debugPrintProcs(true)
-			dropProcs()
-			debugPrintProcs(true)
-
-			// Find top PID
-			rootPID = getTopPID()
-			rootIdx := getPidIndex(rootPID)
-			if rootIdx != -1 {
-				printTree(rootIdx, "")
-			}
+			CalculateTerminalWidth()
+			RenderTree()
 
 			return nil
 		},
@@ -260,6 +242,26 @@ If a user name is specified, all process trees rooted at processes owned by that
 	if err := rootCmd.Execute(); err != nil {
 		log.Errorf("Error: %v", err)
 		os.Exit(1)
+	}
+}
+
+func RenderTree() {
+	// Print initialization string
+	fmt.Print(config.TreeChar.Init)
+
+	// Build and print tree
+	makeTreeHierarchy()
+	debugPrintProcs(false)
+	markProcs()
+	debugPrintProcs(true)
+	dropProcs()
+	debugPrintProcs(true)
+
+	// Find top PID
+	rootPID = getTopPID()
+	rootIdx := getPidIndex(rootPID)
+	if rootIdx != -1 {
+		printTree(rootIdx, "")
 	}
 }
 

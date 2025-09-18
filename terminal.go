@@ -1,4 +1,4 @@
-package pstree
+package main
 
 import (
 	"errors"
@@ -12,7 +12,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func calculateTerminalWidth() {
+const (
+	maxLine = 8192
+)
+
+func CalculateTerminalWidth() {
 	// Get terminal width
 	config.Columns = getTerminalWidth()
 	if config.Columns == 0 {

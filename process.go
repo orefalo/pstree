@@ -1,4 +1,4 @@
-package pstree
+package main
 
 import (
 	"bufio"
@@ -26,7 +26,7 @@ var (
 	nProc int
 
 	// current rendering depth
-	AtLDepth int = 0
+	atLDepth int = 0
 )
 
 // printTree recursively prints the process tree
@@ -35,11 +35,11 @@ func printTree(idx int, head string) {
 		return
 	}
 
-	if AtLDepth == config.MaxLDepth {
+	if atLDepth == config.MaxLDepth {
 		return
 	}
 
-	AtLDepth++
+	atLDepth++
 
 	var thread string
 	if procs[idx].ThreadCount > 1 {
@@ -103,7 +103,7 @@ func printTree(idx int, head string) {
 		child = procs[child].SisterIdx
 	}
 
-	AtLDepth--
+	atLDepth--
 }
 
 // getTopPID finds the root process PID
@@ -258,8 +258,8 @@ func stripPath(path string) string {
 	return path
 }
 
-// getProcessesDirect reads processes directly from /proc filesystem (Linux)
-func getProcessesDirect() error {
+// getProcessesLinux reads processes directly from /proc filesystem (Linux)
+func getProcessesLinux() error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("direct process reading only supported on Linux")
 	}
