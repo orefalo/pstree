@@ -14,6 +14,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/lipgloss/tree"
 	"github.com/charmbracelet/log"
 )
 
@@ -29,62 +30,40 @@ var (
 	atLDepth int = 0
 )
 
-// printTree recursively prints the process tree
-func printTree(idx int, head string) {
-	if head == "" && !procs[idx].Print {
+func printTree2() {
+	t := tree.Root(".")
+	recupPrintTree(idx, head)
+	fmt.Println(t)
+}
+
+func recupPrintTree(idx int, head string) {
+
+	process := procs[idx]
+	if head == "" && !process.Print {
 		return
 	}
-
 	if atLDepth == config.MaxLDepth {
 		return
 	}
-
 	atLDepth++
 
+	t := tree.New().
+		Root("Linux").
+		Child("NixOS").
+		Child("Arch Linux (btw)").
+		Child("Void Linux")
+
 	var thread string
-	if procs[idx].ThreadCount > 1 {
-		thread = fmt.Sprintf("[%d]", procs[idx].ThreadCount)
+	if process.ThreadCount > 1 {
+		thread = fmt.Sprintf("[%d]", process.ThreadCount)
 	}
 
-	var pgl string
-	if procs[idx].PID == procs[idx].PGID {
-		pgl = config.TreeChar.PGL
-	} else {
-		pgl = config.TreeChar.NPGL
-	}
-
-	var barChar string
-	if head == "" {
-		barChar = ""
-	} else if procs[idx].SisterIdx != -1 {
-		barChar = config.TreeChar.BarC
-	} else {
-		barChar = config.TreeChar.BarL
-	}
-
-	var pChar string
-	if procs[idx].ChildIdx != -1 {
-		pChar = config.TreeChar.P
-	} else {
-		pChar = config.TreeChar.S2
-	}
-
-	out := fmt.Sprintf("%s%s%s%s%s%s %05d %s %s%s",
-		config.TreeChar.SG,
+	out := fmt.Sprintf("%s %05d %s %s%s",
 		head,
-		barChar,
-		pChar,
-		pgl,
-		config.TreeChar.EG,
-		procs[idx].PID,
-		procs[idx].Owner,
+		process.PID,
+		process.Owner,
 		thread,
-		procs[idx].Cmd)
-
-	if len(out) > config.Columns-1 {
-		out = out[:config.Columns-1]
-	}
-	fmt.Println(out)
+		process.Cmd)
 
 	// Process children
 	var nhead string
@@ -98,6 +77,88 @@ func printTree(idx int, head string) {
 
 	// recursively process children
 	child := procs[idx].ChildIdx
+	for child != -1 {
+		var branch = recupPrintTree(child, nhead)
+		if branch != nil {
+			t.Child(branch)
+		}
+		child = procs[child].SisterIdx
+	}
+
+	atLDepth--
+}
+
+// printTree recursively prints the process tree
+func printTree(idx int, head string) {
+
+	process := procs[idx]
+	if head == "" && !process.Print {
+		return
+	}
+
+	if atLDepth == config.MaxLDepth {
+		return
+	}
+
+	atLDepth++
+
+	var thread string
+	if process.ThreadCount > 1 {
+		thread = fmt.Sprintf("[%d]", process.ThreadCount)
+	}
+
+	var pgl string
+	if process.PID == process.PGID {
+		pgl = config.TreeChar.PGL
+	} else {
+		pgl = config.TreeChar.NPGL
+	}
+
+	var barChar string
+	if head == "" {
+		barChar = ""
+	} else if process.SisterIdx != -1 {
+		barChar = config.TreeChar.BarC
+	} else {
+		barChar = config.TreeChar.BarL
+	}
+
+	var pChar string
+	if process.ChildIdx != -1 {
+		pChar = config.TreeChar.P
+	} else {
+		pChar = config.TreeChar.S2
+	}
+
+	out := fmt.Sprintf("%s%s%s%s%s%s %05d %s %s%s",
+		config.TreeChar.SG,
+		head,
+		barChar,
+		pChar,
+		pgl,
+		config.TreeChar.EG,
+		process.PID,
+		process.Owner,
+		thread,
+		process.Cmd)
+
+	if len(out) > config.Columns-1 {
+		out = out[:config.Columns-1]
+	}
+	fmt.Println(out)
+
+	// Process children
+	var nhead string
+	if head == "" {
+		nhead = ""
+	} else if process.SisterIdx != -1 {
+		nhead = head + config.TreeChar.Bar + " "
+	} else {
+		nhead = head + "  "
+	}
+
+	// recursively process children
+	child := process.ChildIdx
 	for child != -1 {
 		printTree(child, nhead)
 		child = procs[child].SisterIdx
@@ -521,12 +582,12 @@ func debugPrintProcs(enforcePrintFlag bool) {
 					return oddRowStyle
 				}
 			}).
-			Headers("idx", "parentIdx", "childIdx", "PID", "PPID", "PROCESS")
+			Headers("idx", "parentIdx", "childIdx", "PID", "PPID", "PGID", "PROCESS")
 
 		for i := range procs {
 			p := procs[i]
 			if enforcePrintFlag && p.Print {
-				t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), p.Cmd)
+				t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), strconv.Itoa(p.PGID), p.Cmd)
 			}
 		}
 		log.Debug(t)
