@@ -52,6 +52,7 @@ type Process struct {
 	// meta data to create and filter the tree structure
 	ParentIdx int
 	ChildIdx  int
+	// next node at same level
 	SisterIdx int
 }
 
