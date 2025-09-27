@@ -164,7 +164,7 @@ func RenderTree() {
 	// Find top PID
 	rootIdx := getPidIndex(getTopPID())
 	if rootIdx != -1 {
-		printTree(rootIdx, "")
+		printTree2(rootIdx)
 	}
 }
 

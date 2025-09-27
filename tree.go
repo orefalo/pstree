@@ -30,142 +30,159 @@ var (
 	atLDepth int = 0
 )
 
-func printTree2() {
-	t := tree.Root(".")
-	recupPrintTree(idx, head)
+func printTree2(idx int) {
+
+	t := recupPrintTree(idx)
+	log.Debugf("printTree2 idx=%d", idx)
+	log.Debugf("printTree2 idx=%d", idx)
 	fmt.Println(t)
 }
 
-func recupPrintTree(idx int, head string) {
+func recupPrintTree(idx int) *tree.Tree {
 
 	process := procs[idx]
-	if head == "" && !process.Print {
-		return
+	if /*head == "" &&*/ !process.Print {
+		return nil
 	}
 	if atLDepth == config.MaxLDepth {
-		return
+		return nil
 	}
 	atLDepth++
-
-	t := tree.New().
-		Root("Linux").
-		Child("NixOS").
-		Child("Arch Linux (btw)").
-		Child("Void Linux")
 
 	var thread string
 	if process.ThreadCount > 1 {
 		thread = fmt.Sprintf("[%d]", process.ThreadCount)
 	}
 
-	out := fmt.Sprintf("%s %05d %s %s%s",
-		head,
-		process.PID,
-		process.Owner,
-		thread,
-		process.Cmd)
+	out := fmt.Sprintf("%05d %s %s%s", process.PID, process.Owner, thread, process.Cmd)
+
+	t := tree.New().Root(out)
 
 	// Process children
-	var nhead string
-	if head == "" {
-		nhead = ""
-	} else if procs[idx].SisterIdx != -1 {
-		nhead = head + config.TreeChar.Bar + " "
-	} else {
-		nhead = head + "  "
+	//var nhead string
+	//if head == "" {
+	//	nhead = ""
+	//} else if procs[idx].SisterIdx != -1 {
+	//	nhead = head + config.TreeChar.Bar + " "
+	//} else {
+	//	nhead = head + "  "
+	//}
+
+	sister := procs[idx].SisterIdx
+	for sister != -1 {
+
+		child := procs[sister].ChildIdx
+		//var branch = recupPrintTree(child)
+		if child == -1 {
+			t.Child(procs[sister].Cmd)
+		}
+		sister = procs[sister].SisterIdx
 	}
 
-	// recursively process children
-	child := procs[idx].ChildIdx
-	for child != -1 {
-		var branch = recupPrintTree(child, nhead)
-		if branch != nil {
-			t.Child(branch)
+	sister = procs[idx].SisterIdx
+	for sister != -1 {
+
+		child := procs[sister].ChildIdx
+		//var branch = recupPrintTree(child)
+		if child != -1 {
+			subtree := recupPrintTree(child)
+			t.Child(subtree)
 		}
-		child = procs[child].SisterIdx
+		sister = procs[sister].SisterIdx
 	}
+
+	//// recursively process children
+	//child := procs[idx].ChildIdx
+	//for child != -1 {
+	//	var branch = recupPrintTree(child)
+	//	if branch != nil {
+	//		t.Child(branch)
+	//	}
+	//	child = procs[child].SisterIdx
+	//}
 
 	atLDepth--
+	return t
 }
 
 // printTree recursively prints the process tree
-func printTree(idx int, head string) {
-
-	process := procs[idx]
-	if head == "" && !process.Print {
-		return
-	}
-
-	if atLDepth == config.MaxLDepth {
-		return
-	}
-
-	atLDepth++
-
-	var thread string
-	if process.ThreadCount > 1 {
-		thread = fmt.Sprintf("[%d]", process.ThreadCount)
-	}
-
-	var pgl string
-	if process.PID == process.PGID {
-		pgl = config.TreeChar.PGL
-	} else {
-		pgl = config.TreeChar.NPGL
-	}
-
-	var barChar string
-	if head == "" {
-		barChar = ""
-	} else if process.SisterIdx != -1 {
-		barChar = config.TreeChar.BarC
-	} else {
-		barChar = config.TreeChar.BarL
-	}
-
-	var pChar string
-	if process.ChildIdx != -1 {
-		pChar = config.TreeChar.P
-	} else {
-		pChar = config.TreeChar.S2
-	}
-
-	out := fmt.Sprintf("%s%s%s%s%s%s %05d %s %s%s",
-		config.TreeChar.SG,
-		head,
-		barChar,
-		pChar,
-		pgl,
-		config.TreeChar.EG,
-		process.PID,
-		process.Owner,
-		thread,
-		process.Cmd)
-
-	if len(out) > config.Columns-1 {
-		out = out[:config.Columns-1]
-	}
-	fmt.Println(out)
-
-	// Process children
-	var nhead string
-	if head == "" {
-		nhead = ""
-	} else if process.SisterIdx != -1 {
-		nhead = head + config.TreeChar.Bar + " "
-	} else {
-		nhead = head + "  "
-	}
-
-	// recursively process children
-	child := process.ChildIdx
-	for child != -1 {
-		printTree(child, nhead)
-		child = procs[child].SisterIdx
-	}
-
-	atLDepth--
-}
+//func printTree(idx int, head string) {
+//
+//	process := procs[idx]
+//	if head == "" && !process.Print {
+//		return
+//	}
+//
+//	if atLDepth == config.MaxLDepth {
+//		return
+//	}
+//
+//	atLDepth++
+//
+//	var thread string
+//	if process.ThreadCount > 1 {
+//		thread = fmt.Sprintf("[%d]", process.ThreadCount)
+//	}
+//
+//	var pgl string
+//	if process.PID == process.PGID {
+//		pgl = config.TreeChar.PGL
+//	} else {
+//		pgl = config.TreeChar.NPGL
+//	}
+//
+//	var barChar string
+//	if head == "" {
+//		barChar = ""
+//	} else if process.SisterIdx != -1 {
+//		barChar = config.TreeChar.BarC
+//	} else {
+//		barChar = config.TreeChar.BarL
+//	}
+//
+//	var pChar string
+//	if process.ChildIdx != -1 {
+//		pChar = config.TreeChar.P
+//	} else {
+//		pChar = config.TreeChar.S2
+//	}
+//
+//	out := fmt.Sprintf("%s%s%s%s%s%s %05d %s %s%s",
+//		config.TreeChar.SG,
+//		head,
+//		barChar,
+//		pChar,
+//		pgl,
+//		config.TreeChar.EG,
+//		process.PID,
+//		process.Owner,
+//		thread,
+//		process.Cmd)
+//
+//	if len(out) > config.Columns-1 {
+//		out = out[:config.Columns-1]
+//	}
+//	fmt.Println(out)
+//
+//	// Process children
+//	var nhead string
+//	if head == "" {
+//		nhead = ""
+//	} else if process.SisterIdx != -1 {
+//		nhead = head + config.TreeChar.Bar + " "
+//	} else {
+//		nhead = head + "  "
+//	}
+//
+//	// recursively process children
+//	child := process.ChildIdx
+//	for child != -1 {
+//		printTree(child, nhead)
+//		child = procs[child].SisterIdx
+//	}
+//
+//	atLDepth--
+//}
 
 // getTopPID finds the root process PID
 func getTopPID() int {
@@ -582,12 +599,12 @@ func debugPrintProcs(enforcePrintFlag bool) {
 					return oddRowStyle
 				}
 			}).
-			Headers("idx", "parentIdx", "childIdx", "PID", "PPID", "PGID", "PROCESS")
+			Headers("idx", "parentIdx", "childIdx", "sisterIdx", "PID", "PPID", "PGID", "PROCESS")
 
 		for i := range procs {
 			p := procs[i]
 			if enforcePrintFlag && p.Print {
-				t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), strconv.Itoa(p.PGID), p.Cmd)
+				t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.SisterIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), strconv.Itoa(p.PGID), p.Cmd)
 			}
 		}
 		log.Debug(t)
