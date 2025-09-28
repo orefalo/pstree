@@ -68,7 +68,7 @@ func recupPrintTree(idx int) *tree.Tree {
 	//	nhead = head + "  "
 	//}
 
-	sister := procs[idx].SisterIdx
+	sister := process.SisterIdx
 	for sister != -1 {
 
 		child := procs[sister].ChildIdx
@@ -79,7 +79,7 @@ func recupPrintTree(idx int) *tree.Tree {
 		sister = procs[sister].SisterIdx
 	}
 
-	sister = procs[idx].SisterIdx
+	sister = process.SisterIdx
 	for sister != -1 {
 
 		child := procs[sister].ChildIdx
@@ -228,13 +228,13 @@ func getTopPID() int {
 func getPidIndex(pid int) int {
 	for i := len(procs) - 1; i >= 0; i-- {
 		if procs[i].PID == pid {
-			if pid != 1 {
-				log.Debugf("getPidIndex(%d)=%d\n", pid, i)
-			}
+			//if pid != 1 {
+			//	log.Debugf("getPidIndex(%d)=%d\n", pid, i)
+			//}
 			return i
 		}
 	}
-	log.Debugf("getPidIndex(%d)=-1\n", pid)
+	//log.Debugf("getPidIndex(%d)=-1\n", pid)
 	return -1
 }
 
@@ -243,11 +243,17 @@ func makeTreeHierarchy() {
 	for i := range procs {
 		parentIdx := getPidIndex(procs[i].PPID)
 		if parentIdx != i && parentIdx != -1 {
+
+			// set the parent idx of the current process
 			procs[i].ParentIdx = parentIdx
-			if procs[parentIdx].ChildIdx == -1 {
-				procs[parentIdx].ChildIdx = i
+
+			// if the parent has no children, point it to the current
+			parent := procs[parentIdx]
+
+			if parent.ChildIdx == -1 {
+				parent.ChildIdx = i
 			} else {
-				sister := procs[parentIdx].ChildIdx
+				sister := parent.ChildIdx
 				for procs[sister].SisterIdx != -1 {
 					sister = procs[sister].SisterIdx
 				}

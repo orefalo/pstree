@@ -157,6 +157,7 @@ func RenderTree() {
 
 	// Build and print tree
 	makeTreeHierarchy()
+
 	markProcs()
 	dropProcs()
 	debugPrintProcs(true)
