@@ -609,7 +609,11 @@ func debugPrintProcs(enforcePrintFlag bool) {
 
 		for i := range procs {
 			p := procs[i]
-			if enforcePrintFlag && p.Print {
+			if enforcePrintFlag {
+				if p.Print {
+					t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.SisterIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), strconv.Itoa(p.PGID), p.Cmd)
+				}
+			} else {
 				t.Row(strconv.Itoa(i), strconv.Itoa(p.ParentIdx), strconv.Itoa(p.ChildIdx), strconv.Itoa(p.SisterIdx), strconv.Itoa(p.PID), strconv.Itoa(p.PPID), strconv.Itoa(p.PGID), p.Cmd)
 			}
 		}

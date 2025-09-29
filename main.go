@@ -157,10 +157,10 @@ func RenderTree() {
 
 	// Build and print tree
 	makeTreeHierarchy()
-
+	debugPrintProcs(false)
 	markProcs()
 	dropProcs()
-	debugPrintProcs(true)
+	//debugPrintProcs(true)
 
 	// Find top PID
 	rootIdx := getPidIndex(getTopPID())
